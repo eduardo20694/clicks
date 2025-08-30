@@ -1,6 +1,6 @@
 import os
 import logging
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, redirect
 from flask_cors import CORS
 import psycopg2
 from psycopg2 import pool
@@ -141,6 +141,38 @@ def stats(site_id):
     except Exception as e:
         logging.error(f"Erro ao buscar stats do site {site_id}: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# -------------------------------
+# Endpoint de redirecionamento de cliques (contagem em tempo real)
+# -------------------------------
+@app.route("/r/<int:site_id>", methods=["GET"])
+def redirect_site(site_id):
+    try:
+        conn, cursor = get_cursor()
+        cursor.execute("SELECT url FROM sites WHERE id=%s", (site_id,))
+        site = cursor.fetchone()
+
+        if not site:
+            release_cursor(conn, cursor)
+            return "Site não encontrado", 404
+
+        url_real = site[0]
+
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+        city, region, country = get_geo_info(ip)
+
+        cursor.execute(
+            "INSERT INTO clicks (site_id, ip, city, region, country) VALUES (%s,%s,%s,%s,%s)",
+            (site_id, ip, city, region, country)
+        )
+        conn.commit()
+        release_cursor(conn, cursor)
+
+        logging.info(f"Clique redirecionado para site {site_id} - IP: {ip}")
+        return redirect(url_real)
+    except Exception as e:
+        logging.error(f"Erro no redirecionamento: {e}")
+        return "Erro ao redirecionar", 500
 
 # -------------------------------
 # Rodar servidor
